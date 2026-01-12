@@ -5,12 +5,11 @@ const cors = require('cors');
 const app = express();
 
 // --- CONFIGURACIÓN DE SEGURIDAD ---
-// Se permite cualquier origen para evitar errores de CORS en dispositivos móviles
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE'], allowedHeaders: ['Content-Type'] }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// --- CONEXIÓN A MYSQL (VINCULADA A TU RAILWAY) ---
+// --- CONEXIÓN A MYSQL ---
 const db = mysql.createPool({
     host: 'crossover.proxy.rlwy.net',
     user: 'root', 
@@ -22,18 +21,16 @@ const db = mysql.createPool({
     queueLimit: 0
 });
 
-// Verificar conexión al iniciar
 db.getConnection((err, conn) => {
     if (err) {
-        console.error('❌ Error conectando a la base de datos de Railway:', err.message);
+        console.error('❌ Error conectando a la base de datos:', err.message);
     } else {
-        console.log('✅ Conexión exitosa a la base de datos en Railway');
+        console.log('✅ Conexión exitosa a Railway');
         conn.release();
     }
 });
 
 // --- 1. MÓDULO DE USUARIOS ---
-
 app.post('/api/login', (req, res) => {
     const { email, password } = req.body;
     const sql = "SELECT id, usuario, correo, empresa_id, rol FROM usuarios WHERE correo = ? AND password = ?";
@@ -47,30 +44,36 @@ app.post('/api/login', (req, res) => {
     });
 });
 
-app.post('/api/registro-empresa', (req, res) => {
-    const { nombre_empresa, usuario, cedula, telefono, correo, password } = req.body;
-    db.getConnection((err, conn) => {
-        if (err) return res.status(500).json({ status: 'error', message: err.message });
-        conn.beginTransaction(err => {
-            if (err) { conn.release(); return res.status(500).send(); }
-            conn.query("INSERT INTO empresas (nombre_empresa) VALUES (?)", [nombre_empresa], (err, result) => {
-                if (err) return conn.rollback(() => { conn.release(); res.status(400).json({ status: 'error', message: 'Empresa ya existe' }); });
-                const empresa_id = result.insertId;
-                conn.query("INSERT INTO usuarios (usuario, cedula, telefono, correo, password, empresa_id, rol) VALUES (?, ?, ?, ?, ?, ?, 'admin')", 
-                [usuario, cedula, telefono, correo, password, empresa_id], (err2) => {
-                    if (err2) return conn.rollback(() => { conn.release(); res.status(500).json({ status: 'error', message: 'Error en registro' }); });
-                    conn.commit(err3 => {
-                        conn.release();
-                        res.json({ status: 'success', message: 'Registrados' });
-                    });
-                });
-            });
-        });
+// --- 2. MÓDULO DE REGISTRO (RUTA QUE USA TU APP DE FLUTTER) ---
+app.post('/api', (req, res) => {
+    const { 
+        cedula_cliente, 
+        nombre_cliente, 
+        empresa_id, 
+        nombre_equipo, 
+        tipo_servicio, 
+        descripcion, 
+        foto_inicial 
+    } = req.body;
+
+    // Convertir la imagen base64 de Flutter a Buffer para MySQL
+    const fotoBuffer = foto_inicial ? Buffer.from(foto_inicial, 'base64') : null;
+
+    // Ajustamos las columnas según la estructura de tu tabla servicios_equipos
+    const sql = `INSERT INTO servicios_equipos 
+                (nombre_cliente, cedula_cliente, empresa_id, nombre_equipo, tipo_servicio, descripcion, foto_inicial) 
+                VALUES (?, ?, ?, ?, ?, ?, ?)`;
+
+    db.query(sql, [nombre_cliente, cedula_cliente, empresa_id || 1, nombre_equipo, tipo_servicio, descripcion, fotoBuffer], (err, result) => {
+        if (err) {
+            console.error("❌ Error al insertar reporte:", err.message);
+            return res.status(500).json({ status: 'error', message: err.message });
+        }
+        res.json({ status: 'success', message: 'Reporte guardado exitosamente', id: result.insertId });
     });
 });
 
-// --- 2. MÓDULO DE ALMACÉN ---
-
+// --- 3. MÓDULO DE ALMACÉN ---
 app.get('/api/productos', (req, res) => {
     const sql = "SELECT * FROM productos_almacen ORDER BY nombre ASC";
     db.query(sql, (err, rows) => {
@@ -93,29 +96,20 @@ app.post('/api/productos', (req, res) => {
     });
 });
 
-// --- 3. MÓDULO DE SERVICIOS ---
-
+// --- 4. LISTADO DE SERVICIOS (GET) ---
 app.get('/api/servicios', (req, res) => {
-    const sql = `
-        SELECT s.*, c.nombre as nombre_cliente, c.cedula as cedula_cliente 
-        FROM servicios_equipos s
-        JOIN clientes c ON s.cliente_id = c.id
-        ORDER BY s.fecha_registro DESC`;
-
+    const sql = `SELECT * FROM servicios_equipos ORDER BY id DESC`; 
     db.query(sql, (err, rows) => {
         if (err) return res.status(500).json({ status: 'error', message: err.message });
-        
         const data = rows.map(row => ({
             ...row,
-            foto_inicial: row.foto_inicial ? row.foto_inicial.toString('base64') : null,
-            foto_actual: row.foto_actual ? row.foto_actual.toString('base64') : null
+            foto_inicial: row.foto_inicial ? row.foto_inicial.toString('base64') : null
         }));
         res.json(data);
     });
 });
 
-// --- LANZAMIENTO (MEJORADO PARA RAILWAY) ---
-// process.env.PORT es fundamental para que Railway asigne su puerto automáticamente
+// --- LANZAMIENTO ---
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Servidor activo en puerto: ${PORT}`);
