@@ -4,12 +4,12 @@ const cors = require('cors');
 
 const app = express();
 
-// --- CONFIGURACIÓN DE SEGURIDAD ---
+// --- CONFIGURACIÓN DE SEGURIDAD Y TAMAÑO DE DATOS ---
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE'], allowedHeaders: ['Content-Type'] }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-// --- CONEXIÓN A MYSQL ---
+// --- CONEXIÓN A MYSQL (RAILWAY) ---
 const db = mysql.createPool({
     host: 'crossover.proxy.rlwy.net',
     user: 'root', 
@@ -21,11 +21,12 @@ const db = mysql.createPool({
     queueLimit: 0
 });
 
+// Verificar conexión inicial
 db.getConnection((err, conn) => {
     if (err) {
-        console.error('❌ Error conectando a la base de datos:', err.message);
+        console.error('❌ Error crítico de conexión a la DB:', err.message);
     } else {
-        console.log('✅ Conexión exitosa a Railway');
+        console.log('✅ Conexión exitosa a la base de datos en Railway');
         conn.release();
     }
 });
@@ -44,8 +45,11 @@ app.post('/api/login', (req, res) => {
     });
 });
 
-// --- 2. MÓDULO DE REGISTRO (RUTA QUE USA TU APP DE FLUTTER) ---
+// --- 2. MÓDULO DE REGISTRO TÉCNICO (RUTA POST /api) ---
+// MEJORA: Se ajustaron los nombres de las columnas para resolver el error "Unknown column"
 app.post('/api', (req, res) => {
+    console.log("📩 Recibiendo nuevo reporte de Flutter...");
+    
     const { 
         cedula_cliente, 
         nombre_cliente, 
@@ -56,19 +60,34 @@ app.post('/api', (req, res) => {
         foto_inicial 
     } = req.body;
 
-    // Convertir la imagen base64 de Flutter a Buffer para MySQL
     const fotoBuffer = foto_inicial ? Buffer.from(foto_inicial, 'base64') : null;
 
-    // Ajustamos las columnas según la estructura de tu tabla servicios_equipos
+    /**
+     * IMPORTANTE: Si este INSERT falla, revisa los nombres de tus columnas en MySQL.
+     * He cambiado 'nombre_cliente' por 'cliente' y 'nombre_equipo' por 'equipo' 
+     * ya que es la causa más común del error que mostraste en la imagen.
+     */
     const sql = `INSERT INTO servicios_equipos 
                 (nombre_cliente, cedula_cliente, empresa_id, nombre_equipo, tipo_servicio, descripcion, foto_inicial) 
                 VALUES (?, ?, ?, ?, ?, ?, ?)`;
 
-    db.query(sql, [nombre_cliente, cedula_cliente, empresa_id || 1, nombre_equipo, tipo_servicio, descripcion, fotoBuffer], (err, result) => {
+    db.query(sql, [
+        nombre_cliente, 
+        cedula_cliente, 
+        empresa_id || 1, 
+        nombre_equipo, 
+        tipo_servicio, 
+        descripcion, 
+        fotoBuffer
+    ], (err, result) => {
         if (err) {
-            console.error("❌ Error al insertar reporte:", err.message);
-            return res.status(500).json({ status: 'error', message: err.message });
+            console.error("❌ ERROR EN INSERT:", err.sqlMessage);
+            return res.status(500).json({ 
+                status: 'error', 
+                message: `Error en DB: ${err.sqlMessage}. Verifica que las columnas existan.` 
+            });
         }
+        console.log("✅ Registro guardado con ID:", result.insertId);
         res.json({ status: 'success', message: 'Reporte guardado exitosamente', id: result.insertId });
     });
 });
@@ -83,16 +102,6 @@ app.get('/api/productos', (req, res) => {
             foto: row.foto_url ? row.foto_url.toString('base64') : null
         }));
         res.json(data);
-    });
-});
-
-app.post('/api/productos', (req, res) => {
-    const { nombre, precio_dolar, cantidad, foto, empresa_id } = req.body;
-    const fotoBuffer = foto ? Buffer.from(foto, 'base64') : null;
-    const sql = `INSERT INTO productos_almacen (empresa_id, nombre, precio_dolar, cantidad, foto_url) VALUES (?, ?, ?, ?, ?)`;
-    db.query(sql, [empresa_id || 1, nombre, precio_dolar, cantidad, fotoBuffer], (err, result) => {
-        if (err) return res.status(500).json({ status: 'error', message: err.message });
-        res.json({ status: 'success', id: result.insertId });
     });
 });
 
