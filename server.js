@@ -93,6 +93,27 @@ app.post('/api/productos', (req, res) => {
     });
 });
 
+// --- 3. MÓDULO DE SERVICIOS ---
+
+app.get('/api/servicios', (req, res) => {
+    const sql = `
+        SELECT s.*, c.nombre as nombre_cliente, c.cedula as cedula_cliente 
+        FROM servicios_equipos s
+        JOIN clientes c ON s.cliente_id = c.id
+        ORDER BY s.fecha_registro DESC`;
+
+    db.query(sql, (err, rows) => {
+        if (err) return res.status(500).json({ status: 'error', message: err.message });
+        
+        const data = rows.map(row => ({
+            ...row,
+            foto_inicial: row.foto_inicial ? row.foto_inicial.toString('base64') : null,
+            foto_actual: row.foto_actual ? row.foto_actual.toString('base64') : null
+        }));
+        res.json(data);
+    });
+});
+
 // --- LANZAMIENTO (MEJORADO PARA RAILWAY) ---
 // process.env.PORT es fundamental para que Railway asigne su puerto automáticamente
 const PORT = process.env.PORT || 3000;
