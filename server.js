@@ -31,7 +31,7 @@ db.getConnection((err, conn) => {
     }
 });
 
-// --- 1. MÓDULO DE USUARIOS ---
+// --- 1. MÓDULO DE USUARIOS Y AUTENTICACIÓN ---
 
 // Login
 app.post('/api/login', (req, res) => {
@@ -47,58 +47,68 @@ app.post('/api/login', (req, res) => {
     });
 });
 
-// NUEVO: Obtener usuarios por Empresa (Para la vista de equipo en Flutter)
+// REGISTRO: Crear nueva empresa y usuario administrador
+app.post('/api/registro-empresa', (req, res) => {
+    const { nombre_empresa, usuario, correo, password, cedula, telefono } = req.body;
+    
+    // 1. Insertar la empresa primero
+    db.query("INSERT INTO empresas (nombre) VALUES (?)", [nombre_empresa], (err, result) => {
+        if (err) return res.status(500).json({ status: 'error', message: "Error al crear empresa: " + err.sqlMessage });
+        
+        const empresaId = result.insertId;
+        
+        // 2. Insertar el usuario asociado a esa empresa
+        const sqlUser = "INSERT INTO usuarios (usuario, correo, password, empresa_id, rol, cedula, telefono) VALUES (?, ?, ?, ?, 'Admin', ?, ?)";
+        db.query(sqlUser, [usuario, correo, password, empresaId, cedula, telefono], (err2) => {
+            if (err2) return res.status(500).json({ status: 'error', message: "Error al crear usuario: " + err2.sqlMessage });
+            res.json({ status: 'success', message: 'Empresa y administrador registrados correctamente' });
+        });
+    });
+});
+
+// REGISTRO: Unirme a una empresa que ya existe
+app.post('/api/unirme-empresa', (req, res) => {
+    const { nombre_empresa, usuario, correo, password, cedula, telefono } = req.body;
+
+    // 1. Buscar el ID de la empresa por su nombre
+    db.query("SELECT id FROM empresas WHERE nombre = ?", [nombre_empresa], (err, rows) => {
+        if (err) return res.status(500).json({ status: 'error', message: err.message });
+        if (rows.length === 0) {
+            return res.status(404).json({ status: 'error', message: "La empresa no existe. Verifica el nombre." });
+        }
+
+        const empresaId = rows[0].id;
+
+        // 2. Insertar el usuario con el ID de la empresa encontrada
+        const sqlUser = "INSERT INTO usuarios (usuario, correo, password, empresa_id, rol, cedula, telefono) VALUES (?, ?, ?, ?, 'Tecnico', ?, ?)";
+        db.query(sqlUser, [usuario, correo, password, empresaId, cedula, telefono], (err2) => {
+            if (err2) return res.status(500).json({ status: 'error', message: "Error al registrar usuario: " + err2.sqlMessage });
+            res.json({ status: 'success', message: 'Registro exitoso. Bienvenido al equipo.' });
+        });
+    });
+});
+
+// Obtener usuarios por Empresa (Compañeros de equipo)
 app.get('/api/usuarios/empresa/:empresaId', (req, res) => {
     const { empresaId } = req.params;
     const sql = "SELECT id, usuario, correo, rol FROM usuarios WHERE empresa_id = ?";
-    
     db.query(sql, [empresaId], (err, rows) => {
-        if (err) {
-            console.error("❌ Error al obtener compañeros:", err);
-            return res.status(500).json({ status: 'error', message: err.message });
-        }
+        if (err) return res.status(500).json({ status: 'error', message: err.message });
         res.json(rows);
     });
 });
 
 // --- 2. MÓDULO DE REGISTRO TÉCNICO (POST /api) ---
 app.post('/api', (req, res) => {
-    console.log("📩 Recibiendo nuevo reporte de Flutter...");
-    
-    const { 
-        cedula_cliente, 
-        nombre_cliente, 
-        empresa_id, 
-        nombre_equipo, 
-        tipo_servicio, 
-        descripcion, 
-        foto_inicial 
-    } = req.body;
-
+    const { cedula_cliente, nombre_cliente, empresa_id, nombre_equipo, tipo_servicio, descripcion, foto_inicial } = req.body;
     const fotoBuffer = foto_inicial ? Buffer.from(foto_inicial, 'base64') : null;
 
-    // Se asume que la tabla se llama servicios_equipos. 
-    // Si el error de "Unknown column" persiste, verifica los nombres exactos en tu DB.
     const sql = `INSERT INTO servicios_equipos 
                 (nombre_cliente, cedula_cliente, empresa_id, nombre_equipo, tipo_servicio, descripcion, foto_inicial, estatus) 
                 VALUES (?, ?, ?, ?, ?, ?, ?, 'Pendiente')`;
 
-    db.query(sql, [
-        nombre_cliente, 
-        cedula_cliente, 
-        empresa_id || 1, 
-        nombre_equipo, 
-        tipo_servicio, 
-        descripcion, 
-        fotoBuffer
-    ], (err, result) => {
-        if (err) {
-            console.error("❌ ERROR EN INSERT:", err.sqlMessage);
-            return res.status(500).json({ 
-                status: 'error', 
-                message: `Error en DB: ${err.sqlMessage}.` 
-            });
-        }
+    db.query(sql, [nombre_cliente, cedula_cliente, empresa_id || 1, nombre_equipo, tipo_servicio, descripcion, fotoBuffer], (err, result) => {
+        if (err) return res.status(500).json({ status: 'error', message: `Error en DB: ${err.sqlMessage}` });
         res.json({ status: 'success', message: 'Reporte guardado', id: result.insertId });
     });
 });
@@ -107,7 +117,6 @@ app.post('/api', (req, res) => {
 app.put('/api/actualizar-estatus', (req, res) => {
     const { id, estatus } = req.body;
     const sql = "UPDATE servicios_equipos SET estatus = ? WHERE id = ?";
-    
     db.query(sql, [estatus, id], (err, result) => {
         if (err) return res.status(500).json({ status: 'error', message: err.message });
         res.json({ status: 'success', message: 'Estatus actualizado' });
@@ -146,4 +155,3 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Servidor activo en puerto: ${PORT}`);
 });
-
