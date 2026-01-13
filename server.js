@@ -47,86 +47,67 @@ app.post('/api/login', (req, res) => {
     });
 });
 
-// REGISTRO: Crear nueva empresa
+// Registro: Nueva Empresa
 app.post('/api/registro-empresa', (req, res) => {
     const { nombre_empresa, usuario, correo, password, cedula, telefono } = req.body;
     
-    // Se intenta insertar en la columna 'nombre'. Si tu tabla usa 'nombre_empresa', ajústalo aquí.
     db.query("INSERT INTO empresas (nombre) VALUES (?)", [nombre_empresa], (err, result) => {
-        if (err) return res.status(500).json({ status: 'error', message: "Error en empresas: " + err.sqlMessage });
+        if (err) return res.status(500).json({ status: 'error', message: "Error Empresas: " + err.sqlMessage });
         
         const empresaId = result.insertId;
         const sqlUser = "INSERT INTO usuarios (usuario, correo, password, empresa_id, rol, cedula, telefono) VALUES (?, ?, ?, ?, 'Admin', ?, ?)";
         
         db.query(sqlUser, [usuario, correo, password, empresaId, cedula, telefono], (err2) => {
-            if (err2) return res.status(500).json({ status: 'error', message: "Error en usuarios: " + err2.sqlMessage });
+            if (err2) return res.status(500).json({ status: 'error', message: "Error Usuarios: " + err2.sqlMessage });
             res.json({ status: 'success', message: 'Registro completo' });
         });
     });
 });
 
-// REGISTRO: Unirme a empresa (Mejorado para detectar 'nombre' o 'nombre_empresa')
+// Registro: Unirme a Empresa (Solución a error de columna "nombre")
 app.post('/api/unirme-empresa', (req, res) => {
     const { nombre_empresa, usuario, correo, password, cedula, telefono } = req.body;
 
-    // Buscamos por la columna 'nombre'. Según tu error, esta es la que debe existir.
-    const sqlBusqueda = "SELECT id FROM empresas WHERE nombre = ?";
+    // MEJORA: Busca en 'nombre' o 'nombre_empresa' para evitar fallos de esquema
+    const sqlBusqueda = "SELECT id FROM empresas WHERE nombre = ? OR nombre_empresa = ?";
 
-    db.query(sqlBusqueda, [nombre_empresa], (err, rows) => {
-        if (err) return res.status(500).json({ status: 'error', message: "Error de búsqueda: " + err.sqlMessage });
-        
-        if (rows.length === 0) {
-            return res.status(404).json({ status: 'error', message: `La empresa '${nombre_empresa}' no existe.` });
-        }
+    db.query(sqlBusqueda, [nombre_empresa, nombre_empresa], (err, rows) => {
+        if (err) return res.status(500).json({ status: 'error', message: "Error búsqueda: " + err.sqlMessage });
+        if (rows.length === 0) return res.status(404).json({ status: 'error', message: "La empresa no existe." });
 
         const empresaId = rows[0].id;
+        // 'Tecnico' se envía corto para evitar el error de "Data truncated"
         const sqlUser = "INSERT INTO usuarios (usuario, correo, password, empresa_id, rol, cedula, telefono) VALUES (?, ?, ?, ?, 'Tecnico', ?, ?)";
         
         db.query(sqlUser, [usuario, correo, password, empresaId, cedula, telefono], (err2) => {
-            if (err2) return res.status(500).json({ status: 'error', message: "Error al unirse: " + err2.sqlMessage });
+            if (err2) return res.status(500).json({ status: 'error', message: "Error al registrarse: " + err2.sqlMessage });
             res.json({ status: 'success', message: 'Unido exitosamente' });
         });
     });
 });
 
-// Compañeros de equipo
-app.get('/api/usuarios/empresa/:empresaId', (req, res) => {
-    const sql = "SELECT id, usuario, correo, rol FROM usuarios WHERE empresa_id = ?";
-    db.query(sql, [req.params.empresaId], (err, rows) => {
-        if (err) return res.status(500).json({ status: 'error', message: err.message });
-        res.json(rows);
-    });
-});
+// --- 2. MÓDULO DE REGISTRO TÉCNICO ---
 
-// --- 2. MÓDULO DE REGISTRO TÉCNICO (Corregido para problemas de columnas de cliente) ---
 app.post('/api', (req, res) => {
     const { cedula_cliente, nombre_cliente, empresa_id, nombre_equipo, tipo_servicio, descripcion, foto_inicial } = req.body;
     const fotoBuffer = foto_inicial ? Buffer.from(foto_inicial, 'base64') : null;
 
-    // Se asegura de insertar en nombre_cliente y cedula_cliente.
-    // IMPORTANTE: Asegúrate que 'cliente_id' en tu DB acepte valores nulos (NULL).
+    // MEJORA: Se eliminó 'cliente_id' de la consulta para evitar el error de "no default value"
     const sql = `INSERT INTO servicios_equipos 
                 (nombre_cliente, cedula_cliente, empresa_id, nombre_equipo, tipo_servicio, descripcion, foto_inicial, estatus) 
                 VALUES (?, ?, ?, ?, ?, ?, ?, 'Pendiente')`;
 
     db.query(sql, [nombre_cliente, cedula_cliente, empresa_id || 1, nombre_equipo, tipo_servicio, descripcion, fotoBuffer], (err, result) => {
         if (err) {
-            console.error("❌ Error en registro de servicio:", err.sqlMessage);
+            // Este error ocurre si no has creado las columnas en Railway
+            console.error("❌ Error DB:", err.sqlMessage);
             return res.status(500).json({ status: 'error', message: `Error DB: ${err.sqlMessage}` });
         }
         res.json({ status: 'success', message: 'Equipo registrado', id: result.insertId });
     });
 });
 
-// --- 3. MÓDULO DE ACTUALIZACIÓN Y LISTADO ---
-
-app.put('/api/actualizar-estatus', (req, res) => {
-    const { id, estatus } = req.body;
-    db.query("UPDATE servicios_equipos SET estatus = ? WHERE id = ?", [estatus, id], (err) => {
-        if (err) return res.status(500).json({ status: 'error', message: err.message });
-        res.json({ status: 'success', message: 'Actualizado' });
-    });
-});
+// --- 3. MÓDULO DE CONSULTAS Y ACTUALIZACIÓN ---
 
 app.get('/api/servicios', (req, res) => {
     db.query("SELECT * FROM servicios_equipos ORDER BY id DESC", (err, rows) => {
@@ -137,6 +118,13 @@ app.get('/api/servicios', (req, res) => {
             foto_actual: row.foto_actual ? row.foto_actual.toString('base64') : null
         }));
         res.json(data);
+    });
+});
+
+app.get('/api/usuarios/empresa/:id', (req, res) => {
+    db.query("SELECT id, usuario, correo, rol FROM usuarios WHERE empresa_id = ?", [req.params.id], (err, rows) => {
+        if (err) return res.status(500).json({ status: 'error', message: err.message });
+        res.json(rows);
     });
 });
 
