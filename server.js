@@ -45,8 +45,7 @@ app.post('/api/login', (req, res) => {
     });
 });
 
-// --- 2. MÓDULO DE REGISTRO TÉCNICO (RUTA POST /api) ---
-// MEJORA: Se ajustaron los nombres de las columnas para resolver el error "Unknown column"
+// --- 2. MÓDULO DE REGISTRO TÉCNICO (POST /api) ---
 app.post('/api', (req, res) => {
     console.log("📩 Recibiendo nuevo reporte de Flutter...");
     
@@ -60,16 +59,13 @@ app.post('/api', (req, res) => {
         foto_inicial 
     } = req.body;
 
+    // Convertimos la imagen base64 de Flutter a un Buffer para guardarlo en el campo LONGBLOB
     const fotoBuffer = foto_inicial ? Buffer.from(foto_inicial, 'base64') : null;
 
-    /**
-     * IMPORTANTE: Si este INSERT falla, revisa los nombres de tus columnas en MySQL.
-     * He cambiado 'nombre_cliente' por 'cliente' y 'nombre_equipo' por 'equipo' 
-     * ya que es la causa más común del error que mostraste en la imagen.
-     */
+    // Consulta SQL usando las columnas que agregamos con el ALTER TABLE
     const sql = `INSERT INTO servicios_equipos 
-                (nombre_cliente, cedula_cliente, empresa_id, nombre_equipo, tipo_servicio, descripcion, foto_inicial) 
-                VALUES (?, ?, ?, ?, ?, ?, ?)`;
+                (nombre_cliente, cedula_cliente, empresa_id, nombre_equipo, tipo_servicio, descripcion, foto_inicial, estatus) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'Pendiente')`;
 
     db.query(sql, [
         nombre_cliente, 
@@ -88,7 +84,11 @@ app.post('/api', (req, res) => {
             });
         }
         console.log("✅ Registro guardado con ID:", result.insertId);
-        res.json({ status: 'success', message: 'Reporte guardado exitosamente', id: result.insertId });
+        res.json({ 
+            status: 'success', 
+            message: 'Reporte guardado exitosamente', 
+            id: result.insertId 
+        });
     });
 });
 
@@ -112,7 +112,9 @@ app.get('/api/servicios', (req, res) => {
         if (err) return res.status(500).json({ status: 'error', message: err.message });
         const data = rows.map(row => ({
             ...row,
-            foto_inicial: row.foto_inicial ? row.foto_inicial.toString('base64') : null
+            // Convertimos el Buffer de la imagen de nuevo a base64 para que Flutter lo lea
+            foto_inicial: row.foto_inicial ? row.foto_inicial.toString('base64') : null,
+            foto_actual: row.foto_actual ? row.foto_actual.toString('base64') : null
         }));
         res.json(data);
     });
