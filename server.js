@@ -51,11 +51,13 @@ app.post('/api/login', (req, res) => {
 app.post('/api/registro-empresa', (req, res) => {
     const { nombre_empresa, usuario, correo, password, cedula, telefono } = req.body;
     
+    // Se usa 'nombre' porque hiciste CHANGE COLUMN en tu base de datos
     db.query("INSERT INTO empresas (nombre) VALUES (?)", [nombre_empresa], (err, result) => {
         if (err) return res.status(500).json({ status: 'error', message: "Error Empresas: " + err.sqlMessage });
         
         const empresaId = result.insertId;
-        const sqlUser = "INSERT INTO usuarios (usuario, correo, password, empresa_id, rol, cedula, telefono) VALUES (?, ?, ?, ?, 'Admin', ?, ?)";
+        // 'admin' en minúsculas para coincidir con tu ENUM de BD
+        const sqlUser = "INSERT INTO usuarios (usuario, correo, password, empresa_id, rol, cedula, telefono) VALUES (?, ?, ?, ?, 'admin', ?, ?)";
         
         db.query(sqlUser, [usuario, correo, password, empresaId, cedula, telefono], (err2) => {
             if (err2) return res.status(500).json({ status: 'error', message: "Error Usuarios: " + err2.sqlMessage });
@@ -64,20 +66,20 @@ app.post('/api/registro-empresa', (req, res) => {
     });
 });
 
-// Registro: Unirme a Empresa (Solución a error de columna "nombre")
+// Registro: Unirme a Empresa
 app.post('/api/unirme-empresa', (req, res) => {
     const { nombre_empresa, usuario, correo, password, cedula, telefono } = req.body;
 
-    // MEJORA: Busca en 'nombre' o 'nombre_empresa' para evitar fallos de esquema
-    const sqlBusqueda = "SELECT id FROM empresas WHERE nombre = ? OR nombre_empresa = ?";
+    // Busca en 'nombre' (columna actualizada en tu BD)
+    const sqlBusqueda = "SELECT id FROM empresas WHERE nombre = ?";
 
-    db.query(sqlBusqueda, [nombre_empresa, nombre_empresa], (err, rows) => {
+    db.query(sqlBusqueda, [nombre_empresa], (err, rows) => {
         if (err) return res.status(500).json({ status: 'error', message: "Error búsqueda: " + err.sqlMessage });
         if (rows.length === 0) return res.status(404).json({ status: 'error', message: "La empresa no existe." });
 
         const empresaId = rows[0].id;
-        // 'Tecnico' se envía corto para evitar el error de "Data truncated"
-        const sqlUser = "INSERT INTO usuarios (usuario, correo, password, empresa_id, rol, cedula, telefono) VALUES (?, ?, ?, ?, 'Tecnico', ?, ?)";
+        // 'empleado' en minúsculas para evitar error "Data truncated"
+        const sqlUser = "INSERT INTO usuarios (usuario, correo, password, empresa_id, rol, cedula, telefono) VALUES (?, ?, ?, ?, 'empleado', ?, ?)";
         
         db.query(sqlUser, [usuario, correo, password, empresaId, cedula, telefono], (err2) => {
             if (err2) return res.status(500).json({ status: 'error', message: "Error al registrarse: " + err2.sqlMessage });
@@ -92,14 +94,14 @@ app.post('/api', (req, res) => {
     const { cedula_cliente, nombre_cliente, empresa_id, nombre_equipo, tipo_servicio, descripcion, foto_inicial } = req.body;
     const fotoBuffer = foto_inicial ? Buffer.from(foto_inicial, 'base64') : null;
 
-    // MEJORA: Se eliminó 'cliente_id' de la consulta para evitar el error de "no default value"
+    // Uso de nombre_cliente y cedula_cliente (columnas agregadas via ALTER TABLE)
+    // Se omite cliente_id porque es NULL por defecto en tu BD
     const sql = `INSERT INTO servicios_equipos 
                 (nombre_cliente, cedula_cliente, empresa_id, nombre_equipo, tipo_servicio, descripcion, foto_inicial, estatus) 
                 VALUES (?, ?, ?, ?, ?, ?, ?, 'Pendiente')`;
 
     db.query(sql, [nombre_cliente, cedula_cliente, empresa_id || 1, nombre_equipo, tipo_servicio, descripcion, fotoBuffer], (err, result) => {
         if (err) {
-            // Este error ocurre si no has creado las columnas en Railway
             console.error("❌ Error DB:", err.sqlMessage);
             return res.status(500).json({ status: 'error', message: `Error DB: ${err.sqlMessage}` });
         }
@@ -121,6 +123,7 @@ app.get('/api/servicios', (req, res) => {
     });
 });
 
+// Ruta para ver compañeros (Soluciona pantalla vacía)
 app.get('/api/usuarios/empresa/:id', (req, res) => {
     db.query("SELECT id, usuario, correo, rol FROM usuarios WHERE empresa_id = ?", [req.params.id], (err, rows) => {
         if (err) return res.status(500).json({ status: 'error', message: err.message });
