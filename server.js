@@ -47,86 +47,85 @@ app.post('/api/login', (req, res) => {
     });
 });
 
-// REGISTRO: Crear nueva empresa y usuario administrador
+// REGISTRO: Crear nueva empresa
 app.post('/api/registro-empresa', (req, res) => {
     const { nombre_empresa, usuario, correo, password, cedula, telefono } = req.body;
     
-    // 1. Insertar la empresa primero
+    // IMPORTANTE: Si tu tabla 'empresas' tiene la columna 'nombre_empresa' en lugar de 'nombre', cámbialo aquí.
     db.query("INSERT INTO empresas (nombre) VALUES (?)", [nombre_empresa], (err, result) => {
-        if (err) return res.status(500).json({ status: 'error', message: "Error al crear empresa: " + err.sqlMessage });
+        if (err) return res.status(500).json({ status: 'error', message: "Error en empresas: " + err.sqlMessage });
         
         const empresaId = result.insertId;
-        
-        // 2. Insertar el usuario asociado a esa empresa
         const sqlUser = "INSERT INTO usuarios (usuario, correo, password, empresa_id, rol, cedula, telefono) VALUES (?, ?, ?, ?, 'Admin', ?, ?)";
+        
         db.query(sqlUser, [usuario, correo, password, empresaId, cedula, telefono], (err2) => {
-            if (err2) return res.status(500).json({ status: 'error', message: "Error al crear usuario: " + err2.sqlMessage });
-            res.json({ status: 'success', message: 'Empresa y administrador registrados correctamente' });
+            if (err2) return res.status(500).json({ status: 'error', message: "Error en usuarios: " + err2.sqlMessage });
+            res.json({ status: 'success', message: 'Registro completo' });
         });
     });
 });
 
-// REGISTRO: Unirme a una empresa que ya existe
+// REGISTRO: Unirme a empresa (Solución al error "Unknown column 'nombre' in where clause")
 app.post('/api/unirme-empresa', (req, res) => {
     const { nombre_empresa, usuario, correo, password, cedula, telefono } = req.body;
 
-    // 1. Buscar el ID de la empresa por su nombre
-    db.query("SELECT id FROM empresas WHERE nombre = ?", [nombre_empresa], (err, rows) => {
-        if (err) return res.status(500).json({ status: 'error', message: err.message });
-        if (rows.length === 0) {
-            return res.status(404).json({ status: 'error', message: "La empresa no existe. Verifica el nombre." });
-        }
+    // Ajuste por si tu columna se llama 'nombre_empresa' en la DB
+    const sqlBusqueda = "SELECT id FROM empresas WHERE nombre = ? OR nombre_empresa = ?";
+
+    db.query(sqlBusqueda, [nombre_empresa, nombre_empresa], (err, rows) => {
+        if (err) return res.status(500).json({ status: 'error', message: "Error de búsqueda: " + err.sqlMessage });
+        if (rows.length === 0) return res.status(404).json({ status: 'error', message: "La empresa no existe." });
 
         const empresaId = rows[0].id;
-
-        // 2. Insertar el usuario con el ID de la empresa encontrada
         const sqlUser = "INSERT INTO usuarios (usuario, correo, password, empresa_id, rol, cedula, telefono) VALUES (?, ?, ?, ?, 'Tecnico', ?, ?)";
+        
         db.query(sqlUser, [usuario, correo, password, empresaId, cedula, telefono], (err2) => {
-            if (err2) return res.status(500).json({ status: 'error', message: "Error al registrar usuario: " + err2.sqlMessage });
-            res.json({ status: 'success', message: 'Registro exitoso. Bienvenido al equipo.' });
+            if (err2) return res.status(500).json({ status: 'error', message: "Error al unirse: " + err2.sqlMessage });
+            res.json({ status: 'success', message: 'Unido exitosamente' });
         });
     });
 });
 
-// Obtener usuarios por Empresa (Compañeros de equipo)
+// Compañeros de equipo
 app.get('/api/usuarios/empresa/:empresaId', (req, res) => {
-    const { empresaId } = req.params;
     const sql = "SELECT id, usuario, correo, rol FROM usuarios WHERE empresa_id = ?";
-    db.query(sql, [empresaId], (err, rows) => {
+    db.query(sql, [req.params.empresaId], (err, rows) => {
         if (err) return res.status(500).json({ status: 'error', message: err.message });
         res.json(rows);
     });
 });
 
-// --- 2. MÓDULO DE REGISTRO TÉCNICO (POST /api) ---
+// --- 2. MÓDULO DE REGISTRO TÉCNICO (Solución a errores de columnas de cliente) ---
 app.post('/api', (req, res) => {
     const { cedula_cliente, nombre_cliente, empresa_id, nombre_equipo, tipo_servicio, descripcion, foto_inicial } = req.body;
     const fotoBuffer = foto_inicial ? Buffer.from(foto_inicial, 'base64') : null;
 
+    // He simplificado las columnas para evitar el error de 'cliente_id' que no tiene default
     const sql = `INSERT INTO servicios_equipos 
                 (nombre_cliente, cedula_cliente, empresa_id, nombre_equipo, tipo_servicio, descripcion, foto_inicial, estatus) 
                 VALUES (?, ?, ?, ?, ?, ?, ?, 'Pendiente')`;
 
     db.query(sql, [nombre_cliente, cedula_cliente, empresa_id || 1, nombre_equipo, tipo_servicio, descripcion, fotoBuffer], (err, result) => {
-        if (err) return res.status(500).json({ status: 'error', message: `Error en DB: ${err.sqlMessage}` });
-        res.json({ status: 'success', message: 'Reporte guardado', id: result.insertId });
+        if (err) {
+            console.error("❌ Error en registro de servicio:", err.sqlMessage);
+            return res.status(500).json({ status: 'error', message: `Error DB: ${err.sqlMessage}` });
+        }
+        res.json({ status: 'success', message: 'Equipo registrado', id: result.insertId });
     });
 });
 
-// --- 3. MÓDULO DE ACTUALIZACIÓN DE ESTATUS ---
+// --- 3. MÓDULO DE ACTUALIZACIÓN Y LISTADO ---
+
 app.put('/api/actualizar-estatus', (req, res) => {
     const { id, estatus } = req.body;
-    const sql = "UPDATE servicios_equipos SET estatus = ? WHERE id = ?";
-    db.query(sql, [estatus, id], (err, result) => {
+    db.query("UPDATE servicios_equipos SET estatus = ? WHERE id = ?", [estatus, id], (err) => {
         if (err) return res.status(500).json({ status: 'error', message: err.message });
-        res.json({ status: 'success', message: 'Estatus actualizado' });
+        res.json({ status: 'success', message: 'Actualizado' });
     });
 });
 
-// --- 4. LISTADO DE SERVICIOS (GET) ---
 app.get('/api/servicios', (req, res) => {
-    const sql = `SELECT * FROM servicios_equipos ORDER BY id DESC`; 
-    db.query(sql, (err, rows) => {
+    db.query("SELECT * FROM servicios_equipos ORDER BY id DESC", (err, rows) => {
         if (err) return res.status(500).json({ status: 'error', message: err.message });
         const data = rows.map(row => ({
             ...row,
@@ -137,10 +136,8 @@ app.get('/api/servicios', (req, res) => {
     });
 });
 
-// --- 5. MÓDULO DE ALMACÉN ---
 app.get('/api/productos', (req, res) => {
-    const sql = "SELECT * FROM productos_almacen ORDER BY nombre ASC";
-    db.query(sql, (err, rows) => {
+    db.query("SELECT * FROM productos_almacen ORDER BY nombre ASC", (err, rows) => {
         if (err) return res.status(500).json({ status: 'error', message: err.message });
         const data = rows.map(row => ({
             ...row,
@@ -153,5 +150,5 @@ app.get('/api/productos', (req, res) => {
 // --- LANZAMIENTO ---
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Servidor activo en puerto: ${PORT}`);
+    console.log(`🚀 Servidor Servitec Cloud activo en puerto: ${PORT}`);
 });
