@@ -51,7 +51,7 @@ app.post('/api/login', (req, res) => {
 app.post('/api/registro-empresa', (req, res) => {
     const { nombre_empresa, usuario, correo, password, cedula, telefono } = req.body;
     
-    // IMPORTANTE: Si tu tabla 'empresas' tiene la columna 'nombre_empresa' en lugar de 'nombre', cámbialo aquí.
+    // Se intenta insertar en la columna 'nombre'. Si tu tabla usa 'nombre_empresa', ajústalo aquí.
     db.query("INSERT INTO empresas (nombre) VALUES (?)", [nombre_empresa], (err, result) => {
         if (err) return res.status(500).json({ status: 'error', message: "Error en empresas: " + err.sqlMessage });
         
@@ -65,16 +65,19 @@ app.post('/api/registro-empresa', (req, res) => {
     });
 });
 
-// REGISTRO: Unirme a empresa (Solución al error "Unknown column 'nombre' in where clause")
+// REGISTRO: Unirme a empresa (Mejorado para detectar 'nombre' o 'nombre_empresa')
 app.post('/api/unirme-empresa', (req, res) => {
     const { nombre_empresa, usuario, correo, password, cedula, telefono } = req.body;
 
-    // Ajuste por si tu columna se llama 'nombre_empresa' en la DB
-    const sqlBusqueda = "SELECT id FROM empresas WHERE nombre = ? OR nombre_empresa = ?";
+    // Buscamos por la columna 'nombre'. Según tu error, esta es la que debe existir.
+    const sqlBusqueda = "SELECT id FROM empresas WHERE nombre = ?";
 
-    db.query(sqlBusqueda, [nombre_empresa, nombre_empresa], (err, rows) => {
+    db.query(sqlBusqueda, [nombre_empresa], (err, rows) => {
         if (err) return res.status(500).json({ status: 'error', message: "Error de búsqueda: " + err.sqlMessage });
-        if (rows.length === 0) return res.status(404).json({ status: 'error', message: "La empresa no existe." });
+        
+        if (rows.length === 0) {
+            return res.status(404).json({ status: 'error', message: `La empresa '${nombre_empresa}' no existe.` });
+        }
 
         const empresaId = rows[0].id;
         const sqlUser = "INSERT INTO usuarios (usuario, correo, password, empresa_id, rol, cedula, telefono) VALUES (?, ?, ?, ?, 'Tecnico', ?, ?)";
@@ -95,12 +98,13 @@ app.get('/api/usuarios/empresa/:empresaId', (req, res) => {
     });
 });
 
-// --- 2. MÓDULO DE REGISTRO TÉCNICO (Solución a errores de columnas de cliente) ---
+// --- 2. MÓDULO DE REGISTRO TÉCNICO (Corregido para problemas de columnas de cliente) ---
 app.post('/api', (req, res) => {
     const { cedula_cliente, nombre_cliente, empresa_id, nombre_equipo, tipo_servicio, descripcion, foto_inicial } = req.body;
     const fotoBuffer = foto_inicial ? Buffer.from(foto_inicial, 'base64') : null;
 
-    // He simplificado las columnas para evitar el error de 'cliente_id' que no tiene default
+    // Se asegura de insertar en nombre_cliente y cedula_cliente.
+    // IMPORTANTE: Asegúrate que 'cliente_id' en tu DB acepte valores nulos (NULL).
     const sql = `INSERT INTO servicios_equipos 
                 (nombre_cliente, cedula_cliente, empresa_id, nombre_equipo, tipo_servicio, descripcion, foto_inicial, estatus) 
                 VALUES (?, ?, ?, ?, ?, ?, ?, 'Pendiente')`;
